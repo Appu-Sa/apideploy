@@ -6,8 +6,11 @@ import os
 app = Flask(__name__)
 
 # Database Configuration for Cloud SQL PostgreSQL
+# In production (Cloud Run), this will come from environment variables
+# In local development, this will come from .env file if you run load_dotenv()
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 
+print(f"DATABASE_URL: {DATABASE_URL}")
 print(f"Using database: {'PostgreSQL' if 'postgresql://' in DATABASE_URL else 'SQLite'}")
 
 # Configure database connection
@@ -184,6 +187,25 @@ def get_data():
         "database_type": "Cloud SQL PostgreSQL" if 'postgresql://' in DATABASE_URL else "SQLite"
     }
     return jsonify(data)
+
+@app.route('/api/debug', methods=['GET'])
+def debug_info():
+    """Debug endpoint to check database configuration"""
+    try:
+        # Get all environment variables that contain 'DATABASE'
+        env_vars = {k: v for k, v in os.environ.items() if 'DATABASE' in k}
+        
+        return jsonify({
+            'database_url': DATABASE_URL,
+            'database_type': 'PostgreSQL' if DATABASE_URL and 'postgresql://' in DATABASE_URL else 'SQLite',
+            'is_cloud_sql': 'cloudsql' in DATABASE_URL if DATABASE_URL else False,
+            'environment': 'production' if DATABASE_URL and 'cloudsql' in DATABASE_URL else 'development',
+            'sqlalchemy_url': app.config['SQLALCHEMY_DATABASE_URI'],
+            'env_vars': env_vars,
+            'all_env_count': len(os.environ)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
