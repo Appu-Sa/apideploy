@@ -1,0 +1,32 @@
+# How to Get Your Cloud SQL Database URL
+# =====================================
+
+# 1. GO TO GCP CONSOLE > Cloud SQL > Your Instance
+
+# 2. COPY THE CONNECTION NAME from Overview tab
+#    Example: my-project-123:us-central1:flask-api-db
+
+# 3. GET YOUR CREDENTIALS:
+#    - Database Name: flask_app_db (or whatever you named it)
+#    - Username: postgres (or your custom username)
+#    - Password: The password you set
+
+# 4. CONSTRUCT THE URL:
+#    postgresql://USERNAME:PASSWORD@/DATABASE_NAME?host=/cloudsql/CONNECTION_NAME
+
+# EXAMPLE:
+# If your connection name is: my-project-123:us-central1:flask-api-db
+# And your password is: mySecurePassword123
+# Then your DATABASE_URL is:
+# postgresql://postgres:mySecurePassword123@/flask_app_db?host=/cloudsql/my-project-123:us-central1:flask-api-db
+
+# REPLACE THESE VALUES WITH YOUR ACTUAL VALUES:
+# PROJECT_ID = my-project-123
+# REGION = us-central1  
+# INSTANCE_NAME = flask-api-db
+# USERNAME = postgres
+# PASSWORD = mySecurePassword123
+# DATABASE_NAME = flask_app_db
+
+# FINAL URL FORMAT:
+# postgresql://postgres:mySecurePassword123@/flask_app_db?host=/cloudsql/my-project-123:us-central1:flask-api-db
