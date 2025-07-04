@@ -2,16 +2,13 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 import os
-import logging
-
-# Configure logging for debugging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
 # Database Configuration for Cloud SQL PostgreSQL
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
+
+print(f"Using database: {'PostgreSQL' if 'postgresql://' in DATABASE_URL else 'SQLite'}")
 
 # Configure database connection
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
@@ -26,9 +23,9 @@ if 'postgresql://' in DATABASE_URL:
         'max_overflow': 0,
         'pool_size': 5
     }
-    logger.info("Using PostgreSQL configuration")
+    print("Using PostgreSQL configuration")
 else:
-    logger.info("Using SQLite configuration")
+    print("Using SQLite configuration")
 
 db = SQLAlchemy(app)
 
@@ -81,7 +78,7 @@ def health_check():
             'environment': 'production' if 'cloudsql' in DATABASE_URL else 'development'
         })
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        print(f"Health check failed: {e}")
         return jsonify({
             'status': 'unhealthy',
             'database': 'disconnected',
@@ -92,7 +89,7 @@ def health_check():
 def initialize_database():
     """Manual database initialization endpoint"""
     try:
-        logger.info("Manual database initialization requested")
+        print("Manual database initialization requested")
         db.create_all()
         
         # Add sample data if no users exist
@@ -107,7 +104,7 @@ def initialize_database():
                 db.session.add(user)
             
             db.session.commit()
-            logger.info("Sample data added successfully")
+            print("Sample data added successfully")
             
             return jsonify({
                 'status': 'success',
@@ -122,7 +119,7 @@ def initialize_database():
             })
             
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
+        print(f"Database initialization failed: {e}")
         db.session.rollback()
         return jsonify({
             'status': 'error',
@@ -137,7 +134,7 @@ def get_users():
         users = User.query.all()
         return jsonify([user.to_dict() for user in users])
     except Exception as e:
-        logger.error(f"Error fetching users: {e}")
+        print(f"Error fetching users: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/users', methods=['POST'])
@@ -158,11 +155,11 @@ def create_user():
         db.session.add(new_user)
         db.session.commit()
         
-        logger.info(f"New user created: {new_user.name}")
+        print(f"New user created: {new_user.name}")
         return jsonify(new_user.to_dict()), 201
         
     except Exception as e:
-        logger.error(f"Error creating user: {e}")
+        print(f"Error creating user: {e}")
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
@@ -173,7 +170,7 @@ def get_user(user_id):
         user = User.query.get_or_404(user_id)
         return jsonify(user.to_dict())
     except Exception as e:
-        logger.error(f"Error fetching user {user_id}: {e}")
+        print(f"Error fetching user {user_id}: {e}")
         return jsonify({'error': str(e)}), 404
 
 @app.route('/api/data', methods=['GET'])
