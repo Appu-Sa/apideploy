@@ -7,18 +7,21 @@ app = Flask(__name__)
 
 # Database Configuration for Cloud SQL PostgreSQL
 # In production (Cloud Run), this will come from environment variables
-# In local development, this will come from .env file if you run load_dotenv()
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-print(f"DATABASE_URL: {DATABASE_URL}")
-print(f"Using database: {'PostgreSQL' if 'postgresql://' in DATABASE_URL else 'SQLite'}")
+if DATABASE_URL:
+    print(f"DATABASE_URL found: {DATABASE_URL[:50]}...")
+    print(f"Using database: {'PostgreSQL' if 'postgresql://' in DATABASE_URL else 'SQLite'}")
+else:
+    print("No DATABASE_URL found, using SQLite fallback")
+    DATABASE_URL = 'sqlite:///fallback.db'
 
 # Configure database connection
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Cloud SQL specific configurations
-if 'postgresql://' in DATABASE_URL:
+if DATABASE_URL and 'postgresql://' in DATABASE_URL:
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_timeout': 20,
         'pool_recycle': 3600,
@@ -30,7 +33,16 @@ if 'postgresql://' in DATABASE_URL:
 else:
     print("Using SQLite configuration")
 
-db = SQLAlchemy(app)
+# Initialize SQLAlchemy with error handling
+try:
+    db = SQLAlchemy(app)
+    print("Database initialized successfully")
+except Exception as e:
+    print(f"Database initialization error: {e}")
+    # Create a fallback SQLite configuration
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///emergency.db'
+    db = SQLAlchemy(app)
+    print("Using emergency SQLite database")
 
 # Database Model
 class User(db.Model):
