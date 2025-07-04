@@ -1,0 +1,8 @@
+runtime: python310
+
+env_variables:
+  DATABASE_URL: "sqlite:///local.db"
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10

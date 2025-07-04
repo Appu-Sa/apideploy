@@ -127,40 +127,30 @@ def health_check():
 # Initialize database tables and sample data
 def init_db():
     """Initialize database tables and add sample data if needed"""
-    db.create_all()
-    
-    # Add sample data if no users exist
-    if not User.query.first():
-        sample_users = [
-            User(name="Alice", age=30, city="New York"),
-            User(name="Bob", age=25, city="San Francisco"),
-            User(name="Charlie", age=35, city="Chicago")
-        ]
+    try:
+        db.create_all()
         
-        for user in sample_users:
-            db.session.add(user)
-        
-        try:
+        # Add sample data if no users exist
+        if not User.query.first():
+            sample_users = [
+                User(name="Alice", age=30, city="New York"),
+                User(name="Bob", age=25, city="San Francisco"),
+                User(name="Charlie", age=35, city="Chicago")
+            ]
+            
+            for user in sample_users:
+                db.session.add(user)
+            
             db.session.commit()
             print("Sample data added successfully")
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error adding sample data: {e}")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error initializing database: {e}")
 
-# Initialize database on first request
-@app.before_request
-def before_first_request():
-    if not hasattr(app, 'db_initialized'):
-        with app.app_context():
-            init_db()
-            app.db_initialized = True
+# Initialize database once at startup
+with app.app_context():
+    init_db()
 
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get('PORT', 5000))
-    
-    # Create tables on startup for local development
-    with app.app_context():
-        init_db()
-    
     app.run(host='0.0.0.0', port=port, debug=False)
