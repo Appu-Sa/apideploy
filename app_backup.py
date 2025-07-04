@@ -49,12 +49,12 @@ class User(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
-# Configure CORS
+# Configure CORS - replace with your Next.js domain in production
 CORS(app, origins=["*"], 
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Alternative manual CORS headers
+# Alternative manual CORS headers (backup)
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -64,85 +64,20 @@ def after_request(response):
 
 @app.route('/')
 def home():
-    return "Welcome to Flask API with Cloud SQL PostgreSQL!"
+    return "Welcome to the simple API with Database!"
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint to verify database connection"""
-    try:
-        # Try to query the database
-        user_count = User.query.count()
-        
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
-            'user_count': user_count,
-            'database_type': 'Cloud SQL PostgreSQL' if 'postgresql://' in DATABASE_URL else 'SQLite',
-            'environment': 'production' if 'cloudsql' in DATABASE_URL else 'development'
-        })
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return jsonify({
-            'status': 'unhealthy',
-            'database': 'disconnected',
-            'error': str(e)
-        }), 500
-
-@app.route('/api/init-db', methods=['POST'])
-def initialize_database():
-    """Manual database initialization endpoint"""
-    try:
-        logger.info("Manual database initialization requested")
-        db.create_all()
-        
-        # Add sample data if no users exist
-        if User.query.count() == 0:
-            sample_users = [
-                User(name="Alice", age=30, city="New York"),
-                User(name="Bob", age=25, city="San Francisco"),
-                User(name="Charlie", age=35, city="Chicago")
-            ]
-            
-            for user in sample_users:
-                db.session.add(user)
-            
-            db.session.commit()
-            logger.info("Sample data added successfully")
-            
-            return jsonify({
-                'status': 'success',
-                'message': 'Database initialized and sample data added',
-                'users_created': len(sample_users)
-            })
-        else:
-            return jsonify({
-                'status': 'info',
-                'message': 'Database already has data',
-                'user_count': User.query.count()
-            })
-            
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Database initialization failed',
-            'error': str(e)
-        }), 500
-
+# Get all users from database
 @app.route('/api/users', methods=['GET'])
 def get_users():
-    """Get all users from database"""
     try:
         users = User.query.all()
         return jsonify([user.to_dict() for user in users])
     except Exception as e:
-        logger.error(f"Error fetching users: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Create a new user
 @app.route('/api/users', methods=['POST'])
 def create_user():
-    """Create a new user"""
     try:
         data = request.get_json()
         
@@ -158,35 +93,77 @@ def create_user():
         db.session.add(new_user)
         db.session.commit()
         
-        logger.info(f"New user created: {new_user.name}")
         return jsonify(new_user.to_dict()), 201
-        
     except Exception as e:
-        logger.error(f"Error creating user: {e}")
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+# Get user by ID
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
-    """Get user by ID"""
     try:
         user = User.query.get_or_404(user_id)
         return jsonify(user.to_dict())
     except Exception as e:
-        logger.error(f"Error fetching user {user_id}: {e}")
         return jsonify({'error': str(e)}), 404
 
-@app.route('/api/data', methods=['GET'])
-def get_data():
-    """Legacy endpoint for compatibility"""
-    data = {
-        "name": "Alice",
-        "age": 30,
-        "city": "New York",
-        "message": "This is sample data. Use /api/users for database operations.",
-        "database_type": "Cloud SQL PostgreSQL" if 'postgresql://' in DATABASE_URL else "SQLite"
-    }
-    return jsonify(data)
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to verify database connection"""
+    try:
+        # Try to query the database
+        user_count = User.query.count()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'user_count': user_count,
+            'database_url': 'Cloud SQL' if '/cloudsql/' in DATABASE_URL else 'Local/Other'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'database': 'disconnected',
+            'error': str(e)
+        }), 500
+
+# Initialize database tables and sample data
+def init_db():
+    """Initialize database tables and add sample data if needed"""
+    try:
+        logger.info("Initializing database...")
+        db.create_all()
+        logger.info("Database tables created successfully")
+        
+        # Add sample data if no users exist
+        if User.query.count() == 0:
+            logger.info("Adding sample data...")
+            sample_users = [
+                User(name="Alice", age=30, city="New York"),
+                User(name="Bob", age=25, city="San Francisco"),
+                User(name="Charlie", age=35, city="Chicago")
+            ]
+            
+            for user in sample_users:
+                db.session.add(user)
+            
+            db.session.commit()
+            logger.info("Sample data added successfully")
+        else:
+            logger.info("Database already has data, skipping sample data creation")
+            
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        db.session.rollback()
+        raise
+
+# Initialize database when the app starts
+try:
+    with app.app_context():
+        init_db()
+except Exception as e:
+    logger.error(f"Failed to initialize database on startup: {e}")
+    # Don't fail completely, allow the app to start
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
