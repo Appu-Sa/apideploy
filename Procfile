@@ -1,1 +1,2 @@
-web: gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
+release: python manage.py migrate --noinput
+web: gunicorn --bind :$PORT wsgi:application

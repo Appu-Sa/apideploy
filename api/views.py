@@ -1,0 +1,250 @@
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from django.conf import settings
+from django.db import connection
+from django.core.files.storage import default_storage
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.views import View
+import os
+import uuid
+from .models import User
+from .serializers import UserSerializer
+from .utils import upload_file_to_gcs, analyze_tennis_video_gcs, get_gcs_signed_url
+
+
+@api_view(['GET'])
+def home(request):
+    """Home endpoint"""
+    return Response({"message": "Welcome to Django API with Cloud SQL PostgreSQL!"})
+
+
+@api_view(['GET'])
+def health_check(request):
+    """Health check endpoint to verify database connection"""
+    try:
+        # Try to query the database
+        user_count = User.objects.count()
+        
+        # Check database type
+        db_engine = settings.DATABASES['default']['ENGINE']
+        is_postgresql = 'postgresql' in db_engine
+        
+        return Response({
+            'status': 'healthy',
+            'database': 'connected',
+            'user_count': user_count,
+            'database_type': 'PostgreSQL' if is_postgresql else 'SQLite',
+            'environment': 'production' if is_postgresql else 'development'
+        })
+    except Exception as e:
+        return Response({
+            'status': 'unhealthy',
+            'database': 'disconnected',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def initialize_database(request):
+    """Manual database initialization endpoint"""
+    try:
+        # Add sample data if no users exist
+        if User.objects.count() == 0:
+            sample_users = [
+                User(name="Alice", age=30, city="New York"),
+                User(name="Bob", age=25, city="San Francisco"),
+                User(name="Charlie", age=35, city="Chicago")
+            ]
+            
+            User.objects.bulk_create(sample_users)
+            
+            return Response({
+                'status': 'success',
+                'message': 'Database initialized and sample data added',
+                'users_created': len(sample_users)
+            })
+        else:
+            return Response({
+                'status': 'info',
+                'message': 'Database already has data',
+                'user_count': User.objects.count()
+            })
+            
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'Database initialization failed',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'POST'])
+def users_view(request):
+    """Get all users or create a new user"""
+    if request.method == 'GET':
+        try:
+            users = User.objects.all()
+            serializer = UserSerializer(users, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    elif request.method == 'POST':
+        try:
+            serializer = UserSerializer(data=request.data)
+            if serializer.is_valid():
+                user = serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_user(request, user_id):
+    """Get user by ID"""
+    try:
+        user = User.objects.get(id=user_id)
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_data(request):
+    """Legacy endpoint for compatibility"""
+    db_engine = settings.DATABASES['default']['ENGINE']
+    is_postgresql = 'postgresql' in db_engine
+    
+    data = {
+        "name": "Alice",
+        "age": 30,
+        "city": "New York",
+        "message": "This is sample data. Use /api/users for database operations.",
+        "database_type": "PostgreSQL" if is_postgresql else "SQLite"
+    }
+    return Response(data)
+
+
+@api_view(['GET'])
+def debug_info(request):
+    """Debug endpoint to check database configuration"""
+    try:
+        # Get all environment variables that contain 'DATABASE'
+        env_vars = {k: v for k, v in os.environ.items() if 'DATABASE' in k}
+        
+        db_engine = settings.DATABASES['default']['ENGINE']
+        is_postgresql = 'postgresql' in db_engine
+        
+        return Response({
+            'database_type': 'PostgreSQL' if is_postgresql else 'SQLite',
+            'is_cloud_sql': 'cloudsql' in str(settings.DATABASES['default']) if settings.DATABASES['default'] else False,
+            'environment': 'production' if is_postgresql else 'development',
+            'env_vars': env_vars,
+            'all_env_count': len(os.environ)
+        })
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UploadImageView(View):
+    """Upload image to GCS"""
+    
+    def post(self, request):
+        try:
+            if 'file' not in request.FILES:
+                return JsonResponse({'error': 'No file part in the request'}, status=400)
+            
+            file = request.FILES['file']
+            if not file.name:
+                return JsonResponse({'error': 'No selected file'}, status=400)
+            
+            if not settings.GCS_BUCKET:
+                return JsonResponse({'error': 'GCS_BUCKET not configured'}, status=500)
+            
+            # Generate secure filename
+            filename = f"{uuid.uuid4()}_{file.name}"
+            
+            url = upload_file_to_gcs(
+                file, 
+                filename, 
+                settings.GCS_BUCKET, 
+                allowed_types=["image/jpeg", "image/png", "image/jpg"], 
+                max_size_mb=10
+            )
+            
+            return JsonResponse({
+                'status': 'success', 
+                'image_url': url, 
+                'filename': filename
+            })
+            
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+
+@api_view(['GET'])
+def get_image_url(request, filename):
+    """Get signed URL for image"""
+    try:
+        if not settings.GCS_BUCKET:
+            return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        url = get_gcs_signed_url(filename, settings.GCS_BUCKET)
+        return Response({'image_url': url})
+        
+    except FileNotFoundError:
+        return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UploadVideoView(View):
+    """Upload and analyze video"""
+    
+    def post(self, request):
+        try:
+            if 'video' not in request.FILES:
+                return JsonResponse({'error': 'No video file provided'}, status=400)
+            
+            video = request.FILES['video']
+            if not video.name:
+                return JsonResponse({'error': 'No selected file'}, status=400)
+            
+            if not settings.GCS_BUCKET:
+                return JsonResponse({'error': 'GCS_BUCKET not configured'}, status=500)
+            
+            # Generate secure filename
+            filename = f"{uuid.uuid4()}_{video.name}"
+            
+            # Upload to GCS
+            url = upload_file_to_gcs(
+                video, 
+                filename, 
+                settings.GCS_BUCKET, 
+                allowed_types=["video/mp4", "video/quicktime", "video/x-matroska"], 
+                max_size_mb=200
+            )
+            
+            gcs_uri = f"gs://{settings.GCS_BUCKET}/{filename}"
+            
+            # Analyze video for tennis
+            tennis_labels, tennis_objects, shots = analyze_tennis_video_gcs(gcs_uri)
+            
+            return JsonResponse({
+                'video_url': url,
+                'tennis_labels': tennis_labels,
+                'tennis_objects': tennis_objects,
+                'shots': shots
+            })
+            
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
