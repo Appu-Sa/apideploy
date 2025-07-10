@@ -1,2 +1,1 @@
-release: python manage.py migrate --noinput
-web: gunicorn --bind :$PORT wsgi:application
+web: python cloud_run_startup.py
