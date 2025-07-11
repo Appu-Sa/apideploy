@@ -321,14 +321,29 @@ def debug_gcs_config(request):
         debug_info = {
             'gcs_bucket': getattr(settings, 'GCS_BUCKET', 'Not configured'),
             'credentials_env_var_set': bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')),
-            'credentials_path': os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'Not set'),
         }
         
-        # Check if credentials file exists
-        creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-        if creds_path:
-            # Try both forward and backslash paths
-            paths_to_try = [creds_path, creds_path.replace('/', '\\'), creds_path.replace('\\', '/')]
+        # Check credentials format
+        creds_env = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'Not set')
+        
+        if creds_env == 'Not set':
+            debug_info['credentials_type'] = 'Not set'
+        elif creds_env.strip().startswith('{'):
+            debug_info['credentials_type'] = 'JSON content'
+            debug_info['credentials_length'] = len(creds_env)
+            # Validate JSON
+            try:
+                import json
+                json.loads(creds_env)
+                debug_info['json_valid'] = True
+            except json.JSONDecodeError:
+                debug_info['json_valid'] = False
+        else:
+            debug_info['credentials_type'] = 'File path'
+            debug_info['credentials_path'] = creds_env
+            
+            # Try both forward and backslash paths for file existence check
+            paths_to_try = [creds_env, creds_env.replace('/', '\\'), creds_env.replace('\\', '/')]
             file_found = False
             for path in paths_to_try:
                 if os.path.exists(path):
@@ -345,8 +360,8 @@ def debug_gcs_config(request):
         
         # Test basic GCS connection
         try:
-            from google.cloud import storage
-            client = storage.Client()
+            from .utils import _get_gcs_client
+            client = _get_gcs_client()
             debug_info['gcs_client_created'] = True
             
             # Try to access the bucket

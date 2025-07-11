@@ -4,14 +4,55 @@ from google.cloud import videointelligence_v1 as vi
 from datetime import timedelta
 import os
 import uuid
+import json
+import tempfile
+
+
+def _get_gcs_client():
+    """Get Google Cloud Storage client with proper credential handling"""
+    creds_env = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+    
+    if not creds_env:
+        raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set')
+    
+    # Check if it's JSON content (starts with '{') or a file path
+    if creds_env.strip().startswith('{'):
+        # It's JSON content - create a temporary file
+        try:
+            # Validate JSON
+            credentials_data = json.loads(creds_env)
+            
+            # Create a temporary file for the credentials
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                json.dump(credentials_data, temp_file)
+                temp_file_path = temp_file.name
+            
+            # Set the environment variable to the temp file path
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_file_path
+            
+            # Create the client
+            client = storage.Client()
+            
+            # Clean up the temp file after client creation
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass  # Ignore cleanup errors
+                
+            return client
+            
+        except json.JSONDecodeError:
+            raise RuntimeError('Invalid JSON content in GOOGLE_APPLICATION_CREDENTIALS')
+    else:
+        # It's a file path
+        if not os.path.exists(creds_env):
+            raise RuntimeError(f'Google Cloud credentials file not found: {creds_env}')
+        
+        return storage.Client()
 
 
 def upload_file_to_gcs(file_obj, filename, bucket_name, allowed_types=None, max_size_mb=10):
     """Upload file to Google Cloud Storage and return signed URL"""
-    # Check for credentials
-    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set or invalid')
-    
     # Validate file type
     if allowed_types and file_obj.content_type not in allowed_types:
         raise ValueError(f'Invalid file type: {file_obj.content_type}')
@@ -21,7 +62,7 @@ def upload_file_to_gcs(file_obj, filename, bucket_name, allowed_types=None, max_
     if size_mb > max_size_mb:
         raise ValueError(f'File too large: {size_mb:.2f} MB (max {max_size_mb} MB)')
     
-    client = storage.Client()
+    client = _get_gcs_client()
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(filename)
     blob.upload_from_file(file_obj, content_type=file_obj.content_type)
@@ -75,7 +116,7 @@ def analyze_tennis_video_gcs(gcs_uri):
 
 def get_gcs_signed_url(filename, bucket_name):
     """Get signed URL for existing file in GCS"""
-    client = storage.Client()
+    client = _get_gcs_client()
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(filename)
     
@@ -90,19 +131,11 @@ def get_gcs_signed_url(filename, bucket_name):
 def delete_file_from_gcs(filename, bucket_name):
     """Delete a file from Google Cloud Storage"""
     try:
-        # Check for credentials
-        creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-        if not creds_path:
-            raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set')
-        
-        if not os.path.exists(creds_path):
-            raise RuntimeError(f'Google Cloud credentials file not found: {creds_path}')
-        
         # Validate filename - it should not contain JSON content
         if filename.strip().startswith('{') or len(filename) > 500:
             raise ValueError(f'Invalid filename provided: {filename[:100]}...')
         
-        client = storage.Client()
+        client = _get_gcs_client()
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(filename)
         
@@ -123,15 +156,7 @@ def delete_file_from_gcs(filename, bucket_name):
 def list_files_from_gcs_folder(folder_path, bucket_name, max_results=100):
     """List files from a specific folder in Google Cloud Storage"""
     try:
-        # Check for credentials
-        creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-        if not creds_path:
-            raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set')
-        
-        if not os.path.exists(creds_path):
-            raise RuntimeError(f'Google Cloud credentials file not found: {creds_path}')
-        
-        client = storage.Client()
+        client = _get_gcs_client()
         bucket = client.bucket(bucket_name)
         
         # Ensure folder_path ends with / if it's not empty
