@@ -12,7 +12,7 @@ import os
 import uuid
 from .models import User
 from .serializers import UserSerializer
-from .utils import upload_file_to_gcs, analyze_tennis_video_gcs, get_gcs_signed_url
+from .utils import upload_file_to_gcs, analyze_tennis_video_gcs, get_gcs_signed_url, delete_file_from_gcs, list_files_from_gcs_folder
 
 
 @api_view(['GET'])
@@ -248,3 +248,48 @@ class UploadVideoView(View):
             
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
+
+
+@api_view(['DELETE'])
+def delete_file(request, filename):
+    """Delete a file from GCS"""
+    try:
+        if not settings.GCS_BUCKET:
+            return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        delete_file_from_gcs(filename, settings.GCS_BUCKET)
+        
+        return Response({
+            'status': 'success',
+            'message': f'File "{filename}" deleted successfully'
+        })
+        
+    except FileNotFoundError:
+        return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def list_files(request):
+    """List files from a specific folder in GCS"""
+    try:
+        if not settings.GCS_BUCKET:
+            return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Get folder path from query parameters
+        folder_path = request.GET.get('folder', '')  # Default to root folder
+        max_results = int(request.GET.get('max_results', 100))  # Default max 100 files
+        
+        files = list_files_from_gcs_folder(folder_path, settings.GCS_BUCKET, max_results)
+        
+        return Response({
+            'status': 'success',
+            'folder': folder_path or 'root',
+            'file_count': len(files),
+            'max_results': max_results,
+            'files': files
+        })
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

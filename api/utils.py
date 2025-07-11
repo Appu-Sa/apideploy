@@ -85,3 +85,55 @@ def get_gcs_signed_url(filename, bucket_name):
     # Generate a signed URL valid for 1 hour
     url = blob.generate_signed_url(expiration=timedelta(hours=1), version="v4")
     return url
+
+
+def delete_file_from_gcs(filename, bucket_name):
+    """Delete a file from Google Cloud Storage"""
+    # Check for credentials
+    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+        raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set or invalid')
+    
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(filename)
+    
+    if not blob.exists():
+        raise FileNotFoundError(f'File "{filename}" not found in bucket "{bucket_name}"')
+    
+    blob.delete()
+    return True
+
+
+def list_files_from_gcs_folder(folder_path, bucket_name, max_results=100):
+    """List files from a specific folder in Google Cloud Storage"""
+    # Check for credentials
+    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+        raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set or invalid')
+    
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    
+    # Ensure folder_path ends with / if it's not empty
+    if folder_path and not folder_path.endswith('/'):
+        folder_path += '/'
+    
+    # List blobs with prefix
+    blobs = bucket.list_blobs(prefix=folder_path, max_results=max_results)
+    
+    files = []
+    for blob in blobs:
+        # Skip the folder itself (empty blob with name ending in /)
+        if blob.name == folder_path:
+            continue
+            
+        files.append({
+            'name': blob.name,
+            'filename': blob.name.split('/')[-1],  # Just the filename without path
+            'size': blob.size,
+            'created': blob.time_created.isoformat() if blob.time_created else None,
+            'updated': blob.updated.isoformat() if blob.updated else None,
+            'content_type': blob.content_type,
+            'full_path': blob.name
+        })
+    
+    return files

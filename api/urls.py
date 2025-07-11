@@ -19,4 +19,8 @@ urlpatterns = [
     path('api/upload-image/', views.UploadImageView.as_view(), name='upload_image'),
     path('api/image-url/<str:filename>/', views.get_image_url, name='get_image_url'),
     path('api/upload-video/', views.UploadVideoView.as_view(), name='upload_video'),
+    
+    # File management endpoints
+    path('api/files/delete/<str:filename>/', views.delete_file, name='delete_file'),
+    path('api/files/list/', views.list_files, name='list_files'),
 ]
