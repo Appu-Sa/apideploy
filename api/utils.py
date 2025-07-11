@@ -89,51 +89,79 @@ def get_gcs_signed_url(filename, bucket_name):
 
 def delete_file_from_gcs(filename, bucket_name):
     """Delete a file from Google Cloud Storage"""
-    # Check for credentials
-    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set or invalid')
-    
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(filename)
-    
-    if not blob.exists():
-        raise FileNotFoundError(f'File "{filename}" not found in bucket "{bucket_name}"')
-    
-    blob.delete()
-    return True
+    try:
+        # Check for credentials
+        creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+        if not creds_path:
+            raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set')
+        
+        if not os.path.exists(creds_path):
+            raise RuntimeError(f'Google Cloud credentials file not found: {creds_path}')
+        
+        # Validate filename - it should not contain JSON content
+        if filename.strip().startswith('{') or len(filename) > 500:
+            raise ValueError(f'Invalid filename provided: {filename[:100]}...')
+        
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(filename)
+        
+        if not blob.exists():
+            raise FileNotFoundError(f'File "{filename}" not found in bucket "{bucket_name}"')
+        
+        blob.delete()
+        return True
+        
+    except Exception as e:
+        # Add more specific error information
+        error_msg = str(e)
+        if 'File' in error_msg and '{' in error_msg:
+            raise ValueError(f'Invalid filename format detected. Expected a simple filename, got JSON-like content.')
+        raise
 
 
 def list_files_from_gcs_folder(folder_path, bucket_name, max_results=100):
     """List files from a specific folder in Google Cloud Storage"""
-    # Check for credentials
-    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set or invalid')
-    
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    
-    # Ensure folder_path ends with / if it's not empty
-    if folder_path and not folder_path.endswith('/'):
-        folder_path += '/'
-    
-    # List blobs with prefix
-    blobs = bucket.list_blobs(prefix=folder_path, max_results=max_results)
-    
-    files = []
-    for blob in blobs:
-        # Skip the folder itself (empty blob with name ending in /)
-        if blob.name == folder_path:
-            continue
-            
-        files.append({
-            'name': blob.name,
-            'filename': blob.name.split('/')[-1],  # Just the filename without path
-            'size': blob.size,
-            'created': blob.time_created.isoformat() if blob.time_created else None,
-            'updated': blob.updated.isoformat() if blob.updated else None,
-            'content_type': blob.content_type,
-            'full_path': blob.name
-        })
-    
-    return files
+    try:
+        # Check for credentials
+        creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+        if not creds_path:
+            raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS environment variable not set')
+        
+        if not os.path.exists(creds_path):
+            raise RuntimeError(f'Google Cloud credentials file not found: {creds_path}')
+        
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        
+        # Ensure folder_path ends with / if it's not empty
+        if folder_path and not folder_path.endswith('/'):
+            folder_path += '/'
+        
+        # List blobs with prefix
+        blobs = bucket.list_blobs(prefix=folder_path, max_results=max_results)
+        
+        files = []
+        for blob in blobs:
+            # Skip the folder itself (empty blob with name ending in /)
+            if blob.name == folder_path:
+                continue
+                
+            files.append({
+                'name': blob.name,
+                'filename': blob.name.split('/')[-1],  # Just the filename without path
+                'size': blob.size,
+                'created': blob.time_created.isoformat() if blob.time_created else None,
+                'updated': blob.updated.isoformat() if blob.updated else None,
+                'content_type': blob.content_type,
+                'full_path': blob.name
+            })
+        
+        return files
+        
+    except Exception as e:
+        # Add more specific error information
+        error_msg = str(e)
+        if 'File' in error_msg and '{' in error_msg:
+            raise ValueError(f'Invalid configuration detected. Check your credentials setup.')
+        raise

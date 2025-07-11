@@ -257,6 +257,13 @@ def delete_file(request, filename):
         if not settings.GCS_BUCKET:
             return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+        # Validate filename format
+        if not filename or len(filename.strip()) == 0:
+            return Response({'error': 'Filename cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if filename.strip().startswith('{') or len(filename) > 500:
+            return Response({'error': 'Invalid filename format'}, status=status.HTTP_400_BAD_REQUEST)
+        
         delete_file_from_gcs(filename, settings.GCS_BUCKET)
         
         return Response({
@@ -266,8 +273,12 @@ def delete_file(request, filename):
         
     except FileNotFoundError:
         return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    except RuntimeError as e:
+        return Response({'error': f'Configuration error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -281,6 +292,10 @@ def list_files(request):
         folder_path = request.GET.get('folder', '')  # Default to root folder
         max_results = int(request.GET.get('max_results', 100))  # Default max 100 files
         
+        # Validate max_results
+        if max_results <= 0 or max_results > 1000:
+            return Response({'error': 'max_results must be between 1 and 1000'}, status=status.HTTP_400_BAD_REQUEST)
+        
         files = list_files_from_gcs_folder(folder_path, settings.GCS_BUCKET, max_results)
         
         return Response({
@@ -291,5 +306,64 @@ def list_files(request):
             'files': files
         })
         
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    except RuntimeError as e:
+        return Response({'error': f'Configuration error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def debug_gcs_config(request):
+    """Debug GCS configuration and credentials"""
+    try:
+        debug_info = {
+            'gcs_bucket': getattr(settings, 'GCS_BUCKET', 'Not configured'),
+            'credentials_env_var_set': bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')),
+            'credentials_path': os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'Not set'),
+        }
+        
+        # Check if credentials file exists
+        creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+        if creds_path:
+            # Try both forward and backslash paths
+            paths_to_try = [creds_path, creds_path.replace('/', '\\'), creds_path.replace('\\', '/')]
+            file_found = False
+            for path in paths_to_try:
+                if os.path.exists(path):
+                    debug_info['credentials_file_exists'] = True
+                    debug_info['credentials_file_size'] = os.path.getsize(path)
+                    debug_info['actual_path_used'] = path
+                    file_found = True
+                    break
+            
+            if not file_found:
+                debug_info['credentials_file_exists'] = False
+                debug_info['credentials_file_size'] = 'File not found'
+                debug_info['paths_tried'] = paths_to_try
+        
+        # Test basic GCS connection
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            debug_info['gcs_client_created'] = True
+            
+            # Try to access the bucket
+            if settings.GCS_BUCKET:
+                bucket = client.bucket(settings.GCS_BUCKET)
+                debug_info['bucket_accessible'] = bucket.exists()
+            else:
+                debug_info['bucket_accessible'] = 'No bucket configured'
+                
+        except Exception as gcs_error:
+            debug_info['gcs_client_created'] = False
+            debug_info['gcs_error'] = str(gcs_error)
+        
+        return Response({
+            'status': 'debug_info',
+            'debug': debug_info
+        })
+        
+    except Exception as e:
+        return Response({'error': f'Debug failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
