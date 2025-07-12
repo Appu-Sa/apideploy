@@ -24,4 +24,5 @@ urlpatterns = [
     path('api/files/delete/<str:filename>/', views.delete_file, name='delete_file'),
     path('api/files/list/', views.list_files, name='list_files'),
     path('api/debug/gcs/', views.debug_gcs_config, name='debug_gcs_config'),
+    path('api/test/logging/', views.test_logging, name='test_logging'),
 ]

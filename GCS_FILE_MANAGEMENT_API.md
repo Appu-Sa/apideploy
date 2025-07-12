@@ -127,3 +127,38 @@ For production deployment on Cloud Run, ensure:
 2. **Folder management:** Organize files by listing specific folders
 3. **Storage monitoring:** Check file counts and sizes in different folders
 4. **File verification:** Confirm files exist before processing
+
+## Debug Endpoint
+
+### GCS Configuration Debug
+
+**Endpoint:** `GET /api/debug/gcs/`
+
+**Description:** Provides debugging information about Google Cloud Storage configuration and connectivity.
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/debug/gcs/"
+```
+
+**Response:**
+```json
+{
+    "status": "debug_info",
+    "debug": {
+        "gcs_bucket": "your-bucket-name",
+        "credentials_env_var_set": true,
+        "credentials_path": "/path/to/credentials.json",
+        "credentials_file_exists": true,
+        "credentials_file_size": 2393,
+        "actual_path_used": "/path/to/credentials.json",
+        "gcs_client_created": true,
+        "bucket_accessible": true
+    }
+}
+```
+
+Use this endpoint to troubleshoot:
+- Missing or incorrect credentials file paths
+- Google Cloud Storage connectivity issues
+- Bucket accessibility problems

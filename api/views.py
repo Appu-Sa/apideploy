@@ -13,6 +13,7 @@ import uuid
 from .models import User
 from .serializers import UserSerializer
 from .utils import upload_file_to_gcs, analyze_tennis_video_gcs, get_gcs_signed_url, delete_file_from_gcs, list_files_from_gcs_folder
+from .logging_utils import api_logger
 
 
 @api_view(['GET'])
@@ -88,8 +89,13 @@ def users_view(request):
         try:
             users = User.objects.all()
             serializer = UserSerializer(users, many=True)
+            
+            api_logger.log_database_operation('SELECT', 'User', count=len(users))
+            api_logger.log_custom(f"Retrieved {len(users)} users", level='INFO', user_count=len(users))
+            
             return Response(serializer.data)
         except Exception as e:
+            api_logger.log_custom(f"Error retrieving users: {str(e)}", level='ERROR', error_type=type(e).__name__)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     elif request.method == 'POST':
@@ -97,9 +103,18 @@ def users_view(request):
             serializer = UserSerializer(data=request.data)
             if serializer.is_valid():
                 user = serializer.save()
+                
+                api_logger.log_database_operation('INSERT', 'User', count=1)
+                api_logger.log_custom(f"Created new user: {user.name}", level='INFO', 
+                                    user_id=user.id, user_name=user.name)
+                
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                api_logger.log_custom(f"Invalid user data: {serializer.errors}", level='WARNING', 
+                                    validation_errors=serializer.errors)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            api_logger.log_custom(f"Error creating user: {str(e)}", level='ERROR', error_type=type(e).__name__)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -254,17 +269,24 @@ class UploadVideoView(View):
 def delete_file(request, filename):
     """Delete a file from GCS"""
     try:
+        api_logger.log_custom(f"Attempting to delete file: {filename}", level='INFO', filename=filename)
+        
         if not settings.GCS_BUCKET:
+            api_logger.log_custom("GCS_BUCKET not configured", level='ERROR')
             return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Validate filename format
         if not filename or len(filename.strip()) == 0:
+            api_logger.log_custom("Empty filename provided", level='WARNING', filename=filename)
             return Response({'error': 'Filename cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
         
         if filename.strip().startswith('{') or len(filename) > 500:
+            api_logger.log_custom("Invalid filename format", level='WARNING', filename=filename[:100])
             return Response({'error': 'Invalid filename format'}, status=status.HTTP_400_BAD_REQUEST)
         
         delete_file_from_gcs(filename, settings.GCS_BUCKET)
+        
+        api_logger.log_gcs_operation('DELETE', settings.GCS_BUCKET, filename, success=True)
         
         return Response({
             'status': 'success',
@@ -272,12 +294,16 @@ def delete_file(request, filename):
         })
         
     except FileNotFoundError:
+        api_logger.log_custom(f"File not found for deletion: {filename}", level='WARNING', filename=filename)
         return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
     except ValueError as e:
+        api_logger.log_custom(f"Validation error deleting file: {str(e)}", level='WARNING', filename=filename)
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except RuntimeError as e:
+        api_logger.log_custom(f"Configuration error deleting file: {str(e)}", level='ERROR', filename=filename)
         return Response({'error': f'Configuration error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
+        api_logger.log_custom(f"Unexpected error deleting file: {str(e)}", level='ERROR', filename=filename, error_type=type(e).__name__)
         return Response({'error': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -285,18 +311,25 @@ def delete_file(request, filename):
 def list_files(request):
     """List files from a specific folder in GCS"""
     try:
-        if not settings.GCS_BUCKET:
-            return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        folder_path = request.GET.get('folder', '')
+        max_results = int(request.GET.get('max_results', 100))
         
-        # Get folder path from query parameters
-        folder_path = request.GET.get('folder', '')  # Default to root folder
-        max_results = int(request.GET.get('max_results', 100))  # Default max 100 files
+        api_logger.log_custom(f"Listing files from folder: {folder_path or 'root'}", level='INFO', 
+                             folder=folder_path, max_results=max_results)
+        
+        if not settings.GCS_BUCKET:
+            api_logger.log_custom("GCS_BUCKET not configured", level='ERROR')
+            return Response({'error': 'GCS_BUCKET not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Validate max_results
         if max_results <= 0 or max_results > 1000:
+            api_logger.log_custom(f"Invalid max_results: {max_results}", level='WARNING', max_results=max_results)
             return Response({'error': 'max_results must be between 1 and 1000'}, status=status.HTTP_400_BAD_REQUEST)
         
         files = list_files_from_gcs_folder(folder_path, settings.GCS_BUCKET, max_results)
+        
+        api_logger.log_gcs_operation('LIST', settings.GCS_BUCKET, folder_path, 
+                                   file_count=len(files), success=True)
         
         return Response({
             'status': 'success',
@@ -307,10 +340,14 @@ def list_files(request):
         })
         
     except ValueError as e:
+        api_logger.log_custom(f"Validation error listing files: {str(e)}", level='WARNING', folder=folder_path)
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except RuntimeError as e:
+        api_logger.log_custom(f"Configuration error listing files: {str(e)}", level='ERROR', folder=folder_path)
         return Response({'error': f'Configuration error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
+        api_logger.log_custom(f"Unexpected error listing files: {str(e)}", level='ERROR', 
+                             folder=folder_path, error_type=type(e).__name__)
         return Response({'error': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -382,3 +419,37 @@ def debug_gcs_config(request):
         
     except Exception as e:
         return Response({'error': f'Debug failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def test_logging(request):
+    """Test endpoint to demonstrate custom logging functionality"""
+    try:
+        message = request.data.get('message', 'Test log message')
+        level = request.data.get('level', 'INFO').upper()
+        
+        # Log with various levels and custom data
+        api_logger.log_custom(
+            f"Test log: {message}", 
+            level=level,
+            test_endpoint=True,
+            user_message=message,
+            timestamp_test=True
+        )
+        
+        # Log some different types of operations
+        api_logger.log_custom("Testing database log", level='INFO', operation_type='database_test')
+        api_logger.log_custom("Testing GCS log", level='INFO', operation_type='gcs_test') 
+        api_logger.log_custom("Testing error log", level='WARNING', operation_type='error_test')
+        
+        return Response({
+            'status': 'success',
+            'message': f'Logged message with level {level}',
+            'logged_message': message,
+            'note': 'Check Google Cloud Logging console to see the structured logs'
+        })
+        
+    except Exception as e:
+        api_logger.log_custom(f"Error in test logging endpoint: {str(e)}", level='ERROR', 
+                             error_type=type(e).__name__)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
