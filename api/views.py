@@ -453,3 +453,29 @@ def test_logging(request):
         api_logger.log_custom(f"Error in test logging endpoint: {str(e)}", level='ERROR', 
                              error_type=type(e).__name__)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def test_specific_logging(request):
+    """Test endpoint specifically for the user retrieval logging"""
+    try:
+        # Simulate getting users and logging exactly like the users_view
+        users = User.objects.all()
+        user_count = len(users)
+        
+        # This should create the exact log message you're looking for
+        api_logger.log_custom(f"Retrieved {user_count} users", level='INFO', user_count=user_count)
+        
+        # Also test with a very obvious message
+        api_logger.log_custom("TESTING CUSTOM LOG MESSAGE - YOU SHOULD SEE THIS", level='INFO', test_marker='FINDME')
+        
+        return Response({
+            'status': 'success',
+            'message': f'Logged: Retrieved {user_count} users',
+            'user_count': user_count,
+            'note': 'Check Google Cloud Logging for the custom log message'
+        })
+        
+    except Exception as e:
+        api_logger.log_custom(f"Error in test specific logging: {str(e)}", level='ERROR')
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
